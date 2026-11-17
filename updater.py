@@ -87,21 +87,23 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _open(url):
+def _open(url, *, no_cache=False):
     parsed = urllib.parse.urlsplit(url)
     if (parsed.scheme != 'https' or parsed.hostname not in _HOSTS or
             parsed.username or parsed.password or parsed.port not in (None, 443)):
         raise ValueError('更新地址不安全。')
     opener = urllib.request.build_opener(_SafeRedirect())
-    return opener.open(urllib.request.Request(url, headers={'User-Agent': 'MaterialRenamer-Updater/1.0',
-                                                           'Cache-Control': 'no-cache'}), timeout=15)
+    headers = {'User-Agent': 'MaterialRenamer-Updater/1.0'}
+    if no_cache:
+        headers.update({'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
+    return opener.open(urllib.request.Request(url, headers=headers), timeout=15)
 
 
 def fetch_manifest(url, repository):
     parsed = urllib.parse.urlsplit(url)
     query = parsed.query + ('&' if parsed.query else '') + 'update_check=' + str(time.time_ns())
     check_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
-    with _open(check_url) as response:
+    with _open(check_url, no_cache=True) as response:
         data = response.read(MAX_MANIFEST_BYTES + 1)
     if len(data) > MAX_MANIFEST_BYTES:
         raise ValueError('更新信息过大。')
