@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 from tkinter import ttk
 
-CURRENT_VERSION = '1.0'
+CURRENT_VERSION = '1.1'
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 _HOSTS = {'github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com',
@@ -210,7 +210,7 @@ def start_installer(downloaded_path):
         raise
 
 
-def startup_update_check(root, manifest_url, repository):
+def startup_update_check(root, manifest_url, repository, manual=False):
     """Show modal startup check. False means caller must immediately exit."""
     dialog = tk.Toplevel(root)
     dialog.title('检查更新')
@@ -263,7 +263,9 @@ def startup_update_check(root, manifest_url, repository):
             state['cancel'].set()
             status.configure(text='正在取消下载…')
         else:
-            finish(False)
+            # A manually opened check can be closed without quitting the app,
+            # unless a newer version has already made updating mandatory.
+            finish(bool(manual and state['manifest'] is None))
 
     dialog.protocol('WM_DELETE_WINDOW', close_dialog)
 
@@ -313,10 +315,16 @@ def startup_update_check(root, manifest_url, repository):
             ttk.Button(controls, text='重试', command=lambda: start(operation)).pack(side='right', padx=4)
             ttk.Button(controls, text='退出软件', command=lambda: finish(False)).pack(side='right', padx=4)
             if operation == 'check' and state['manifest'] is None:
-                ttk.Button(controls, text='暂时打开软件', command=lambda: finish(True)).pack(side='right', padx=4)
+                ttk.Button(controls, text='返回软件' if manual else '暂时打开软件', command=lambda: finish(True)).pack(side='right', padx=4)
         elif operation == 'check':
             if not is_newer(value['version']):
-                finish(True)
+                if not manual:
+                    finish(True)
+                    return
+                title.configure(text='已是最新版本')
+                show_body('当前版本：' + CURRENT_VERSION + '\n已经是最新版本。')
+                status.configure(text='')
+                ttk.Button(controls, text='关闭', command=lambda: finish(True)).pack(side='right', padx=4)
                 return
             state['manifest'] = value
             title.configure(text=value['date'] + ' 更新公告')

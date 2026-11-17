@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from updater import CURRENT_VERSION, startup_update_check
+import settings
 
 
 PRODUCTS = {'修护牙膏': '修', '色修牙膏': '色修', '釉龈双护牙膏': '双护', '口干口臭专健牙膏': '专健', '儿童牙膏': '儿童'}
@@ -37,6 +38,22 @@ def validate_part(value, label, required=False):
         return
     if INVALID.search(value) or value[-1] in '. ':
         raise ValueError(f'{label}含 Windows 不允许的字符，或以空格/点结尾。')
+
+
+def format_fourth(name, value):
+    """Add the category wording once, leaving empty and free-form items alone."""
+    value = value.strip()
+    if not value:
+        return ''
+    prefixes = {'达人': '达人', '痛点': '痛点'}
+    suffixes = {'官媒专场': '专场', '大促活动': '活动', '品牌活动事件': '品牌事件'}
+    prefix = prefixes.get(name, '')
+    suffix = suffixes.get(name, '')
+    if prefix and not value.startswith(prefix):
+        value = prefix + value
+    if suffix and not value.endswith(suffix):
+        value += suffix
+    return value
 
 
 def make_name(fields, original, index, total):
@@ -91,6 +108,10 @@ def make_name(fields, original, index, total):
 class App(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
+        self._saved_settings = settings.load_settings()
+        self._settings_ready = False
+        self._settings_timer = None
+        self._normal_geometry = None
         self.title('素材批量重命名工具 v' + CURRENT_VERSION)
         self.geometry('1240x860')
         self.minsize(680, 500)
@@ -115,6 +136,9 @@ class App(TkinterDnD.Tk):
         self.platform.trace_add('write', self.update_operators)
         self.product.trace_add('write', self.update_operators)
         self.update_operators()
+        self.restore_settings()
+        self.setup_autosave()
+        self.protocol('WM_DELETE_WINDOW', self.close_app)
         for widget in (self, self.tree):
             widget.drop_target_register(DND_FILES)
             widget.dnd_bind('<<Drop>>', self.drop_files)
@@ -125,6 +149,7 @@ class App(TkinterDnD.Tk):
         header = ttk.Frame(outer)
         header.pack(fill='x')
         ttk.Label(header, text='素材批量重命名', font=('Microsoft YaHei UI', 12, 'bold')).pack(side='left')
+        ttk.Button(header, text='检查更新', command=self.check_updates).pack(side='right')
 
         # A visibly raised divider can be dragged to change the height of the file area.
         pane = tk.PanedWindow(outer, orient='vertical', sashwidth=9, sashrelief='raised',
@@ -155,7 +180,7 @@ class App(TkinterDnD.Tk):
         def heading(text):
             ttk.Label(form, text=text, font=('Microsoft YaHei UI', 9, 'bold'), foreground='black').pack(anchor='w', pady=(3, 0))
 
-        def flow(items, max_cols, min_cell):
+        def flow(items, max_cols, min_cell, weights=None):
             container = ttk.Frame(form)
             container.pack(fill='x')
             widgets = [make(container) for make in items]
@@ -166,13 +191,14 @@ class App(TkinterDnD.Tk):
                     return
                 state['cols'] = cols
                 for i in range(max_cols):
-                    container.columnconfigure(i, weight=1 if i < cols else 0, uniform='flow' if i < cols else '')
+                    weight = (weights[i] if weights and cols == max_cols else 1) if i < cols else 0
+                    container.columnconfigure(i, weight=weight, uniform='flow' if i < cols else '')
                 for i, widget in enumerate(widgets):
-                    widget.grid(row=i // cols, column=i % cols, sticky='ew', padx=(0, 6), pady=2)
+                    widget.grid(row=i // cols, column=i % cols, sticky='ew', padx=(0, 6), pady=1)
             container.bind('<Configure>', layout)
             return container
 
-        def field(text, variable, kind='entry', values=None, width=12, bold=False):
+        def field(text, variable, kind='entry', values=None, width=12, bold=False, expand=True):
             def build(parent):
                 item = ttk.Frame(parent)
                 options = {'font': ('Microsoft YaHei UI', 9, 'bold'), 'foreground': 'black'} if bold else {}
@@ -181,7 +207,7 @@ class App(TkinterDnD.Tk):
                     w = ttk.Combobox(item, textvariable=variable, values=values, state='readonly', width=width)
                 else:
                     w = ttk.Entry(item, textvariable=variable, width=width)
-                w.pack(side='left', fill='x', expand=True)
+                w.pack(side='left', fill='x' if expand else None, expand=expand)
                 return item
             return build
 
@@ -195,16 +221,20 @@ class App(TkinterDnD.Tk):
             item = ttk.Frame(parent)
             ttk.Checkbutton(item, text='组长自剪', variable=self.leader).pack(side='left')
             return item
-        flow([editor_field,
-              field('平台 *', self.platform, 'combo', list(PLATFORMS), 9, bold=True),
-              field('产品 *', self.product, 'combo', list(PRODUCTS), 11, bold=True),
-              field('日期 *', self.date, width=11, bold=True), leader_field], 5, 180)
-        operators_line = ttk.Frame(form)
-        operators_line.pack(fill='x', pady=1)
-        self.operator_label = ttk.Label(operators_line, text='运营（多选） *', font=('Microsoft YaHei UI', 9, 'bold'), foreground='black')
-        self.operator_label.pack(side='left', padx=(0, 4))
-        self.operator_frame = ttk.Frame(operators_line)
-        self.operator_frame.pack(side='left')
+        def operators_field(parent):
+            item = ttk.Frame(parent)
+            self.operator_label = ttk.Label(item, text='运营（多选） *', font=('Microsoft YaHei UI', 9, 'bold'), foreground='black')
+            self.operator_label.pack(side='left', padx=(0, 4))
+            self.operator_frame = ttk.Frame(item)
+            self.operator_frame.pack(side='left')
+            return item
+
+        # Keep the two requested rows independent so reflow never moves the
+        # product/date/operator group into the first row on narrow windows.
+        flow([editor_field, leader_field,
+              field('平台 *', self.platform, 'combo', list(PLATFORMS), 9, bold=True)], 3, 280)
+        flow([field('产品 *', self.product, 'combo', list(PRODUCTS), 11, bold=True),
+              field('日期 *', self.date, width=11, bold=True), operators_field], 3, 285, weights=(3, 3, 4))
 
         heading('素材分类')
         def third_field(parent):
@@ -213,13 +243,13 @@ class App(TkinterDnD.Tk):
             for k in ('复刻', '迭代', '创新'):
                 ttk.Radiobutton(item, text=k, variable=self.third, value=k).pack(side='left')
             return item
-        flow([field('一级分类 *', self.first, 'combo', ['功效', '背书', '活动'], 9, bold=True),
-              field('二级分类 *', self.second, 'combo', ['口播', '混剪', '直播切片', '清水素材'], 9, bold=True),
-              third_field], 3, 250)
+        flow([field('一级分类 *', self.first, 'combo', ['功效', '背书', '活动'], 20, bold=True, expand=False),
+              field('二级分类 *', self.second, 'combo', ['口播', '混剪', '直播切片', '清水素材'], 20, bold=True, expand=False),
+              third_field], 1, 1)
         heading('四级分类（按需填写）')
         items = [field(key, var, width=10) for key, var in self.fourth_text.items()]
-        items.append(field('自定义素材名', self.title_text, width=10))
         flow(items, 4, 205)
+        flow([field('自定义素材名', self.title_text, width=20, expand=False)], 1, 1)
         def checkbox(key, var):
             def build(parent):
                 item = ttk.Frame(parent)
@@ -260,12 +290,150 @@ class App(TkinterDnD.Tk):
             if bbox:
                 position = min(bbox[3] + 4, max(120, pane.winfo_height() - 125))
                 pane.sash_place(0, 0, position)
-        self.after(150, initial_split)
+        self._initial_split = initial_split
         # Prefer a full-screen workspace so both the form and file list are visible.
         try:
             self.state('zoomed')
         except tk.TclError:
             self.geometry(f'{min(1360, self.winfo_screenwidth())}x{min(760, self.winfo_screenheight())}')
+
+    def check_updates(self):
+        if not startup_update_check(self, UPDATE_MANIFEST_URL, UPDATE_REPOSITORY, manual=True):
+            self.close_app()
+
+    def restore_settings(self):
+        data = self._saved_settings
+        def assign(var, key, valid=None):
+            value = data.get(key)
+            if isinstance(value, str) and (valid is None or value in valid):
+                var.set(value)
+
+        assign(self.editor, 'editor')
+        if isinstance(data.get('leader'), bool): self.leader.set(data['leader'])
+        assign(self.platform, 'platform', PLATFORMS)
+        assign(self.product, 'product', PRODUCTS)
+        self.date.set(settings.restored_date(data))
+        assign(self.first, 'first', ('功效', '背书', '活动'))
+        assign(self.second, 'second', ('口播', '混剪', '直播切片', '清水素材'))
+        assign(self.third, 'third', ('', '复刻', '迭代', '创新'))
+        assign(self.title_text, 'title_text')
+        assign(self.ai_person, 'ai_person', [''] + AI_PEOPLE)
+        assign(self.ai_type, 'ai_type', ('', '输出创意AI', '承接创意AI'))
+        assign(self.director, 'director', [''] + DIRECTORS)
+        fourth_text = data.get('fourth_text')
+        if isinstance(fourth_text, dict):
+            for key, var in self.fourth_text.items():
+                value = fourth_text.get(key)
+                if isinstance(value, str): var.set(value)
+        fourth_fixed = data.get('fourth_fixed')
+        if isinstance(fourth_fixed, dict):
+            for key, var in self.fourth_fixed.items():
+                value = fourth_fixed.get(key)
+                if isinstance(value, bool): var.set(value)
+        chosen = data.get('operators')
+        if isinstance(chosen, list):
+            for key, var in self.operator_vars.items(): var.set(key in chosen)
+
+        files = data.get('files')
+        missing = 0
+        if isinstance(files, list):
+            seen = set()
+            for item in files:
+                if not isinstance(item, dict) or not isinstance(item.get('path'), str):
+                    continue
+                path = Path(item['path'])
+                try:
+                    key = os.path.normcase(str(path.resolve()))
+                    if not path.is_file():
+                        missing += 1
+                    elif key not in seen:
+                        title = item.get('title', '')
+                        self.files.append({'path': path, 'title': title if isinstance(title, str) else ''})
+                        seen.add(key)
+                except (OSError, ValueError):
+                    missing += 1
+            self.draw()
+        if missing:
+            self.status.set(f'已恢复上次内容；{missing} 个文件已不存在，已从列表移除。')
+        elif self.files:
+            self.status.set(f'已恢复上次内容和 {len(self.files)} 个文件，请重新生成预览。')
+
+        geometry = data.get('geometry')
+        match = re.fullmatch(r'(\d+)x(\d+)([+-]\d+)([+-]\d+)', geometry or '') if isinstance(geometry, str) else None
+        if match:
+            width, height, x, y = map(int, match.groups())
+            screen_w, screen_h = self.winfo_screenwidth(), self.winfo_screenheight()
+            width = max(680, min(width, screen_w))
+            height = max(500, min(height, screen_h))
+            x = max(0, min(x, max(0, screen_w - width)))
+            y = max(0, min(y, max(0, screen_h - height)))
+            self.state('normal')
+            self.geometry(f'{width}x{height}+{x}+{y}')
+            self._normal_geometry = f'{width}x{height}+{x}+{y}'
+        if data.get('maximized') is True:
+            try: self.state('zoomed')
+            except tk.TclError: pass
+        elif match:
+            self.state('normal')
+
+        def restore_split():
+            self.update_idletasks()
+            sash = data.get('sash')
+            if isinstance(sash, int) and not isinstance(sash, bool) and 120 <= sash <= self.pane.winfo_height() - 110:
+                self.pane.sash_place(0, 0, sash)
+            else:
+                self._initial_split()
+        self.after(150, restore_split)
+
+    def setup_autosave(self):
+        variables = [self.editor, self.leader, self.platform, self.product, self.date,
+                     self.first, self.second, self.third, self.title_text,
+                     self.ai_person, self.ai_type, self.director]
+        variables += list(self.fourth_text.values()) + list(self.fourth_fixed.values())
+        for var in variables: var.trace_add('write', self.schedule_save)
+        self.bind('<Configure>', self.window_changed, add='+')
+        self.pane.bind('<ButtonRelease-1>', self.schedule_save, add='+')
+        self._settings_ready = True
+
+    def window_changed(self, event):
+        if event.widget is not self: return
+        if self.state() == 'normal':
+            self._normal_geometry = self.geometry()
+        self.schedule_save()
+
+    def schedule_save(self, *_):
+        if not self._settings_ready: return
+        if self._settings_timer is not None:
+            try: self.after_cancel(self._settings_timer)
+            except tk.TclError: pass
+        self._settings_timer = self.after(500, self.save_current_settings)
+
+    def save_current_settings(self):
+        self._settings_timer = None
+        state = self.state()
+        if state == 'normal': self._normal_geometry = self.geometry()
+        try: sash = self.pane.sash_coord(0)[1]
+        except tk.TclError: sash = None
+        data = {'editor': self.editor.get(), 'leader': self.leader.get(),
+                'platform': self.platform.get(), 'product': self.product.get(),
+                'date': self.date.get(), '_saved_on': dt.date.today().isoformat(),
+                'first': self.first.get(), 'second': self.second.get(), 'third': self.third.get(),
+                'title_text': self.title_text.get(), 'ai_person': self.ai_person.get(),
+                'ai_type': self.ai_type.get(), 'director': self.director.get(),
+                'fourth_text': {k: v.get() for k, v in self.fourth_text.items()},
+                'fourth_fixed': {k: v.get() for k, v in self.fourth_fixed.items()},
+                'operators': self.selected_operators(),
+                'files': [{'path': str(f['path']), 'title': f['title']} for f in self.files],
+                'geometry': self._normal_geometry, 'maximized': state == 'zoomed', 'sash': sash}
+        settings.save_settings(data)
+
+    def close_app(self):
+        if self._settings_timer is not None:
+            try: self.after_cancel(self._settings_timer)
+            except tk.TclError: pass
+            self._settings_timer = None
+        self.save_current_settings()
+        self.destroy()
 
     def update_operators(self, *_):
         p, product = self.platform.get(), self.product.get()
@@ -276,6 +444,7 @@ class App(TkinterDnD.Tk):
             values = OPERATORS.get((p, product), []) + ['李想']
             for value in values:
                 var = tk.BooleanVar(value=value != '李想')
+                var.trace_add('write', self.schedule_save)
                 self.operator_vars[value] = var
                 ttk.Checkbutton(self.operator_frame, text=value, variable=var).pack(side='left', padx=2)
         else:
@@ -332,9 +501,10 @@ class App(TkinterDnD.Tk):
         for i, f in enumerate(self.files):
             result, status = preview[i] if preview is not None else ('', '')
             self.tree.insert('', 'end', iid=str(i), values=(str(f['path']), f['title'], self.operator_for(i) if preview is not None else '', result, status))
+        self.schedule_save()
 
     def fields(self, f, index=0):
-        fourth_text = [v.get().strip() for v in self.fourth_text.values() if v.get().strip()]
+        fourth_text = [format_fourth(k, v.get()) for k, v in self.fourth_text.items() if v.get().strip()]
         fourth_fixed = [k for k, v in self.fourth_fixed.items() if v.get()]
         return {'editor': self.editor.get(), 'leader': self.leader.get(), 'platform': self.platform.get(),
                 'product': self.product.get(), 'date': self.date.get(), 'first': self.first.get(),
