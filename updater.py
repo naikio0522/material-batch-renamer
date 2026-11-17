@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 from tkinter import ttk
 
-CURRENT_VERSION = '1.1'
+CURRENT_VERSION = '1.3'
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 _HOSTS = {'github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com',
@@ -74,8 +74,17 @@ def validate_manifest(raw, repository):
     digest = raw.get('sha256')
     if not isinstance(digest, str) or not re.fullmatch(r'[A-Fa-f0-9]{64}', digest):
         raise ValueError('更新包校验值不正确。')
-    return {'version': version, 'date': date, 'notes': notes,
-            'download_url': url, 'sha256': digest.lower()}
+    result = {'version': version, 'date': date, 'notes': notes,
+              'download_url': url, 'sha256': digest.lower()}
+    layout, revision = raw.get('layout'), raw.get('layout_revision')
+    if isinstance(layout, dict) and isinstance(revision, str):
+        try:
+            _version(revision)
+            if not is_newer(revision, version):
+                result['layout'], result['layout_revision'] = layout, revision
+        except ValueError:
+            pass
+    return result
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -210,15 +219,47 @@ def start_installer(downloaded_path):
         raise
 
 
-def startup_update_check(root, manifest_url, repository, manual=False):
+def center_update_dialog(root, dialog, width=520, height=300):
+    """Center in the owning application; use screen center for a hidden owner."""
+    root.update_idletasks()
+    dialog.update_idletasks()
+    visible_owner = root.state() != 'withdrawn' and root.winfo_width() > 1
+    if visible_owner:
+        x = root.winfo_rootx() + (root.winfo_width() - width) // 2
+        y = root.winfo_rooty() + (root.winfo_height() - height) // 2
+    else:
+        x = (root.winfo_screenwidth() - width) // 2
+        y = (root.winfo_screenheight() - height) // 2
+    dialog.geometry(f'{width}x{height}{x:+d}{y:+d}')
+    dialog.deiconify()
+    dialog.update_idletasks()
+    if os.name == 'nt' and visible_owner:
+        # Native outer rectangles include title bars and work across monitors.
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.windll.user32
+        api.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        api.GetAncestor.restype = wintypes.HWND
+        api.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        api.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        owner_hwnd = api.GetAncestor(root.winfo_id(), 2)
+        dialog_hwnd = api.GetAncestor(dialog.winfo_id(), 2)
+        owner_rect, dialog_rect = wintypes.RECT(), wintypes.RECT()
+        if api.GetWindowRect(owner_hwnd, ctypes.byref(owner_rect)) and api.GetWindowRect(dialog_hwnd, ctypes.byref(dialog_rect)):
+            x = (owner_rect.left + owner_rect.right - (dialog_rect.right - dialog_rect.left)) // 2
+            y = (owner_rect.top + owner_rect.bottom - (dialog_rect.bottom - dialog_rect.top)) // 2
+            api.SetWindowPos(dialog_hwnd, None, x, y, 0, 0, 0x0015)
+
+
+def startup_update_check(root, manifest_url, repository, manual=False, on_manifest=None):
     """Show modal startup check. False means caller must immediately exit."""
     dialog = tk.Toplevel(root)
+    dialog.withdraw()
     dialog.title('检查更新')
     dialog.geometry('520x300')
     dialog.resizable(False, False)
     if root.state() != 'withdrawn':
         dialog.transient(root)
-    dialog.grab_set()
     title = ttk.Label(dialog, text='正在检查更新…', font=('Microsoft YaHei UI', 11, 'bold'))
     title.pack(anchor='w', padx=18, pady=(16, 8))
     body_frame = ttk.Frame(dialog)
@@ -317,6 +358,8 @@ def startup_update_check(root, manifest_url, repository, manual=False):
             if operation == 'check' and state['manifest'] is None:
                 ttk.Button(controls, text='返回软件' if manual else '暂时打开软件', command=lambda: finish(True)).pack(side='right', padx=4)
         elif operation == 'check':
+            if on_manifest is not None:
+                on_manifest(value)
             if not is_newer(value['version']):
                 if not manual:
                     finish(True)
@@ -351,6 +394,8 @@ def startup_update_check(root, manifest_url, repository, manual=False):
         state['after_id'] = dialog.after(100, poll)
 
     show_body('正在查看是否有新版本。')
+    center_update_dialog(root, dialog)
+    dialog.grab_set()
     start('check')
     state['after_id'] = dialog.after(100, poll)
     root.wait_window(dialog)

@@ -1,24 +1,26 @@
 # 素材批量重命名工具
 
-Windows 桌面工具，支持批量生成素材名称、自动分配运营、预览及重名检查。使用方法见 [使用说明](使用说明.txt)。
+Windows 桌面软件，当前版本 **1.3**。从 [Releases](https://github.com/naikio0522/material-batch-renamer/releases) 下载 `material-renamer.exe`，双击运行，无需安装 Python。
 
-## 下载与使用
+支持素材分类命名、运营平均分配、指定或自动序号、部分素材勾选重命名、结果预览及文件重名保护。列表列标题可拖动换位，个人填写内容和窗口设置会保存。软件启动时自动检查更新，标题旁也可手动检查。发现新版后须更新或退出；检查失败时可暂时打开软件。
 
-从本仓库的 [Releases](https://github.com/naikio0522/material-batch-renamer/releases) 下载最新的 `material-renamer.exe`，在 Windows 上双击运行，无需安装 Python。
+序号默认为 `#`，按勾选素材的列表顺序输出 1、2、3……；填写数字时，各素材使用该固定值。序号位于日期之后、一级分类之前。
 
-软件启动时会从本仓库的 `update.json` 检查版本。发现比当前版本新的版本后，会显示更新公告；必须更新或退出，才能继续。暂时无法检查时，可以重试或暂时打开软件。
+使用方法见 [使用说明](使用说明.txt)，发布步骤见 [发布和更新说明](发布和更新说明.md)。开发者管理工具为独立程序，正式版没有后台入口。
 
-## 发布新版与修改公告
+## 从源码运行或打包
 
-参见 [发布和更新说明](发布和更新说明.md)。仓库根目录的 `update.json` 控制版本号、更新日期、公告文字、下载地址及安装包校验值。请先上传新版安装包，再更新 `update.json`，避免用户遇到无法下载的更新。
-
-## 从源代码运行
-
-需要 Windows、Python 3.13 和 Tkinter。在仓库目录打开 PowerShell：
+需要 Windows、Python 3.13 和 Tkinter：
 
 ```powershell
 python -m pip install -r requirements.txt
 python app.py
 ```
 
-自动替换程序仅适用于打包后的 Windows exe。请勿在仓库、更新公告或发布包中加入访问令牌、密码或私人资料。
+打包正式版本：
+
+```powershell
+python build_release.py
+```
+
+生成 `dist\material-renamer.exe`，附带由源码版本生成的完整性标记。该标记用于核对版本、防止误传，不能代替数字签名。
