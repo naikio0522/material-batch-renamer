@@ -1,7 +1,7 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "date": "2026-11-17",
-  "notes": "1.0 版本发布：支持批量重命名和启动时检查更新。",
-  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.0/material-renamer.exe",
-  "sha256": "83bdda944c39b801fe2cb16321b0dc01c85f27cc93142703492c102430df89bb"
+  "notes": "1. 按确认的布局重新排列基本信息和素材分类。\n2. 达人、官媒专场、大促活动、痛点及品牌活动事件自动补齐名称。\n3. 自定义素材名单独显示，填写内容、运营选择、文件列表和窗口布局可在下次打开时恢复。\n4. 标题栏新增“检查更新”按钮。",
+  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.1/material-renamer.exe",
+  "sha256": "06a44573727d17ff14b1bfd28d9bd584661de0d025de4b6deb102bedeaa8b3c9"
 }
