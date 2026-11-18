@@ -7,6 +7,7 @@ if it returns False the caller must destroy root and terminate the process.
 """
 
 import datetime
+import base64
 import hashlib
 import json
 import os
@@ -27,7 +28,29 @@ CURRENT_VERSION = '1.3.1'
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 _HOSTS = {'github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com',
-          'objects.githubusercontent.com'}
+          'objects.githubusercontent.com', 'gitee.com', 'attachments.gitee.com'}
+GITEE_REPOSITORY = 'naikio/material-batch-renamer'
+
+
+def validate_download_url(url, repository):
+    if not isinstance(url, str):
+        raise ValueError('更新下载地址不正确。')
+    parsed = urllib.parse.urlsplit(url)
+    path = urllib.parse.unquote(parsed.path)
+    if (parsed.scheme != 'https' or parsed.username or parsed.password or
+            parsed.port not in (None, 443) or parsed.fragment):
+        raise ValueError('更新下载地址不安全。')
+    if parsed.hostname == 'github.com':
+        valid = path.casefold().startswith(('/' + repository + '/releases/download/').casefold()) and path.casefold().endswith('.exe')
+    elif parsed.hostname == 'gitee.com':
+        friendly = path.casefold().startswith(('/' + GITEE_REPOSITORY + '/releases/download/').casefold()) and path.casefold().endswith('.exe')
+        api_path = re.fullmatch('/api/v5/repos/' + re.escape(GITEE_REPOSITORY) + r'/releases/[0-9]+/attach_files/[0-9]+/download', path)
+        valid = friendly or bool(api_path)
+    else:
+        valid = False
+    if not valid:
+        raise ValueError('更新下载地址不是指定发布仓库的安装包。')
+    return url
 
 
 def _version(value):
@@ -60,22 +83,17 @@ def validate_manifest(raw, repository):
     notes = raw.get('notes')
     if not isinstance(notes, str) or not notes.strip() or len(notes) > 12000:
         raise ValueError('更新公告内容不正确。')
-    url = raw.get('download_url')
-    if not isinstance(url, str):
-        raise ValueError('更新下载地址不正确。')
-    parsed = urllib.parse.urlsplit(url)
-    path = urllib.parse.unquote(parsed.path)
-    required_prefix = '/' + repository + '/releases/download/'
-    if (parsed.scheme != 'https' or parsed.hostname != 'github.com' or
-            parsed.username or parsed.password or parsed.port not in (None, 443) or
-            not path.casefold().startswith(required_prefix.casefold()) or
-            not path.casefold().endswith('.exe') or parsed.fragment):
-        raise ValueError('更新下载地址不是指定仓库的 GitHub 安装包。')
+    url = validate_download_url(raw.get('download_url'), repository)
     digest = raw.get('sha256')
     if not isinstance(digest, str) or not re.fullmatch(r'[A-Fa-f0-9]{64}', digest):
         raise ValueError('更新包校验值不正确。')
     result = {'version': version, 'date': date, 'notes': notes,
               'download_url': url, 'sha256': digest.lower()}
+    mirrors = raw.get('download_urls')
+    if mirrors is not None:
+        if not isinstance(mirrors, list) or not 1 <= len(mirrors) <= 4:
+            raise ValueError('更新备用下载地址不正确。')
+        result['download_urls'] = list(dict.fromkeys([url] + [validate_download_url(item, repository) for item in mirrors]))
     layout, revision = raw.get('layout'), raw.get('layout_revision')
     if isinstance(layout, dict) and isinstance(revision, str):
         try:
@@ -108,7 +126,7 @@ def _open(url, *, no_cache=False):
     return opener.open(urllib.request.Request(url, headers=headers), timeout=15)
 
 
-def fetch_manifest(url, repository):
+def _fetch_manifest(url, repository):
     parsed = urllib.parse.urlsplit(url)
     query = parsed.query + ('&' if parsed.query else '') + 'update_check=' + str(time.time_ns())
     check_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
@@ -118,17 +136,34 @@ def fetch_manifest(url, repository):
         raise ValueError('更新信息过大。')
     try:
         raw = json.loads(data.decode('utf-8-sig'))
+        if isinstance(raw, dict) and raw.get('encoding') == 'base64' and isinstance(raw.get('content'), str):
+            data = base64.b64decode(raw['content'])
+            if len(data) > MAX_MANIFEST_BYTES: raise ValueError('更新信息过大。')
+            raw = json.loads(data.decode('utf-8-sig'))
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise ValueError('更新信息读取失败。') from None
     return validate_manifest(raw, repository)
 
 
-def download_update(manifest, target_dir, cancel=None):
+def fetch_manifest(url, repository):
+    sources = [url] if isinstance(url, str) else list(url)
+    if not sources:
+        raise ValueError('未配置更新来源。')
+    last_error = None
+    for source in sources:
+        try:
+            return _fetch_manifest(source, repository)
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError('暂时无法连接更新来源，请稍后重试。') from last_error
+
+
+def _download_update(manifest, target_dir, url, cancel=None):
     """Download into the executable directory, checking size and SHA-256."""
     fd, path = tempfile.mkstemp(prefix='.material-update-', suffix='.exe', dir=target_dir)
     digest, size = hashlib.sha256(), 0
     try:
-        with os.fdopen(fd, 'wb') as output, _open(manifest['download_url']) as response:
+        with os.fdopen(fd, 'wb') as output, _open(url) as response:
             while True:
                 if cancel is not None and cancel.is_set():
                     raise RuntimeError('已取消下载。')
@@ -151,6 +186,19 @@ def download_update(manifest, target_dir, cancel=None):
         except OSError:
             pass
         raise
+
+
+def download_update(manifest, target_dir, cancel=None):
+    sources = manifest.get('download_urls', [manifest['download_url']])
+    last_error = None
+    for source in sources:
+        if cancel is not None and cancel.is_set():
+            raise RuntimeError('已取消下载。')
+        try:
+            return _download_update(manifest, target_dir, source, cancel)
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError('安装包下载未完成，请稍后重试。') from last_error
 
 
 _HELPER = r'''param([string]$CurrentExe, [string]$NewExe, [int]$OldPid)

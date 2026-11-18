@@ -17,7 +17,11 @@ from rename_core import (
 )
 
 UPDATE_REPOSITORY = 'naikio0522/material-batch-renamer'
-UPDATE_MANIFEST_URL = 'https://github.com/naikio0522/material-batch-renamer/raw/refs/heads/main/update.json'
+UPDATE_MANIFEST_URL = (
+    'https://gitee.com/naikio/material-batch-renamer/raw/master/update.json',
+    'https://gitee.com/api/v5/repos/naikio/material-batch-renamer/contents/update.json?ref=master',
+    'https://github.com/naikio0522/material-batch-renamer/raw/refs/heads/main/update.json',
+)
 UI_LAYOUT_REVISION = '1.3-serial-and-file-checkboxes'
 TABLE_COLUMNS = ('checked', 'old', 'title', 'operator', 'new', 'status')
 FILE_PANE_MIN_HEIGHT = 80
