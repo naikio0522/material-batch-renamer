@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 from tkinter import ttk
 
-CURRENT_VERSION = '1.3'
+CURRENT_VERSION = '1.3.1'
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 _HOSTS = {'github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com',
@@ -155,8 +155,20 @@ def download_update(manifest, target_dir, cancel=None):
 
 _HELPER = r'''param([string]$CurrentExe, [string]$NewExe, [int]$OldPid)
 $ErrorActionPreference = 'Stop'
+# The helper outlives the old one-file process. Never reuse its extracted DLLs.
+foreach ($name in @([Environment]::GetEnvironmentVariables('Process').Keys)) {
+    if ($name.StartsWith('_PYI_', [StringComparison]::OrdinalIgnoreCase)) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+}
+foreach ($name in @('TCL_LIBRARY', 'TK_LIBRARY', 'PYTHONHOME', 'PYTHONPATH')) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
+$env:PYINSTALLER_RESET_ENVIRONMENT = '1'
 $backup = "$CurrentExe.backup-$([guid]::NewGuid().ToString('N'))"
 $log = Join-Path $env:TEMP 'material-renamer-update-error.log'
+$readyFile = Join-Path $env:TEMP "material-renamer-ready-$([guid]::NewGuid().ToString('N')).json"
+$newProcess = $null
 try {
     Wait-Process -Id $OldPid -Timeout 45 -ErrorAction SilentlyContinue
     if (Get-Process -Id $OldPid -ErrorAction SilentlyContinue) { throw 'Old process did not exit.' }
@@ -170,12 +182,30 @@ try {
     if (-not $moved) { throw 'Could not replace the existing executable.' }
     try {
         Move-Item -LiteralPath $NewExe -Destination $CurrentExe
+        $env:MATERIAL_RENAMER_UPDATE_READY = $readyFile
         $newProcess = Start-Process -FilePath $CurrentExe -PassThru
-        Start-Sleep -Seconds 3
-        $newProcess.Refresh()
-        if ($newProcess.HasExited -and $newProcess.ExitCode -ne 0) { throw 'Updated process could not start.' }
+        $ready = $false
+        for ($i = 0; $i -lt 90; $i++) {
+            if (Test-Path -LiteralPath $readyFile) {
+                try {
+                    $started = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json
+                    if ([String]::Equals($started.executable, $CurrentExe, [StringComparison]::OrdinalIgnoreCase)) { $ready = $true; break }
+                } catch { }
+            }
+            $newProcess.Refresh()
+            if ($newProcess.HasExited) { throw 'Updated process exited before its interface was ready.' }
+            Start-Sleep -Milliseconds 500
+        }
+        if (-not $ready) { throw 'Updated interface did not become ready.' }
         Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     } catch {
+        if ($null -ne $newProcess) {
+            $newProcess.Refresh()
+            if (-not $newProcess.HasExited) {
+                & taskkill.exe /PID $newProcess.Id /T /F 2>$null | Out-Null
+                Start-Sleep -Milliseconds 500
+            }
+        }
         if (Test-Path -LiteralPath $CurrentExe) { Remove-Item -LiteralPath $CurrentExe -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $CurrentExe }
         throw
@@ -190,8 +220,10 @@ try {
         }
         [void][System.Windows.Forms.MessageBox]::Show($message, '更新失败')
     } catch { }
+    Remove-Item Env:MATERIAL_RENAMER_UPDATE_READY -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $CurrentExe) { Start-Process -FilePath $CurrentExe -ErrorAction SilentlyContinue }
 } finally {
+    if (Test-Path -LiteralPath $readyFile) { Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $NewExe) { Remove-Item -LiteralPath $NewExe -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
@@ -206,17 +238,56 @@ def start_installer(downloaded_path):
                                      delete=False, encoding='utf-8-sig') as script:
         script.write(_HELPER)
         helper = script.name
+    environment = os.environ.copy()
+    for name in tuple(environment):
+        if name.upper().startswith('_PYI_') or name.upper() in ('TCL_LIBRARY', 'TK_LIBRARY', 'PYTHONHOME', 'PYTHONPATH'):
+            environment.pop(name, None)
+    environment['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+    dll_directory = None
+    kernel32 = None
     try:
+        # Windows propagates SetDllDirectory to child processes too. Temporarily
+        # restore the OS search path while starting the external PowerShell.
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetDllDirectoryW.argtypes = [ctypes.c_uint32, ctypes.c_wchar_p]
+        kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+        length = kernel32.GetDllDirectoryW(0, None)
+        if length:
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            kernel32.GetDllDirectoryW(len(buffer), buffer)
+            dll_directory = buffer.value
+        if not kernel32.SetDllDirectoryW(None):
+            raise OSError('无法初始化更新程序的运行环境。')
         subprocess.Popen(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
                           '-File', helper, '-CurrentExe', current, '-NewExe', downloaded_path,
                           '-OldPid', str(os.getpid())],
-                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), close_fds=True)
+                         env=environment, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), close_fds=True)
     except Exception:
         try:
             os.remove(helper)
         except OSError:
             pass
         raise
+    finally:
+        if kernel32 is not None:
+            kernel32.SetDllDirectoryW(dll_directory)
+
+
+def acknowledge_update_start():
+    """Acknowledge only after the new application's GUI has initialized."""
+    value = os.environ.pop('MATERIAL_RENAMER_UPDATE_READY', None)
+    if not value or not getattr(sys, 'frozen', False):
+        return
+    ready_file = Path(value)
+    temp_roots = {Path(tempfile.gettempdir()).resolve()}
+    for name in ('TEMP', 'TMP'):
+        if os.environ.get(name): temp_roots.add(Path(os.environ[name]).resolve())
+    if ready_file.parent.resolve() not in temp_roots or not re.fullmatch(r'material-renamer-ready-[a-f0-9]{32}\.json', ready_file.name):
+        return
+    payload = {'executable': str(Path(sys.executable).resolve()), 'version': CURRENT_VERSION}
+    with ready_file.open('w', encoding='utf-8') as stream:
+        json.dump(payload, stream)
 
 
 def center_update_dialog(root, dialog, width=520, height=300):

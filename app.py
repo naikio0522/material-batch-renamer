@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinterdnd2 import DND_FILES, TkinterDnD
-from updater import CURRENT_VERSION, startup_update_check, is_newer
+from updater import CURRENT_VERSION, startup_update_check, is_newer, acknowledge_update_start
 import settings
 import layout_schema
 
@@ -753,6 +753,8 @@ class App(TkinterDnD.Tk):
 
 if __name__ == '__main__':
     application = App()
+    application.update_idletasks()
+    acknowledge_update_start()
     def startup_check():
         if not startup_update_check(application, UPDATE_MANIFEST_URL, UPDATE_REPOSITORY, on_manifest=application._receive_shared_layout):
             application.close_app()
