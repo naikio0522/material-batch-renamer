@@ -1,9 +1,9 @@
 {
-  "version": "1.3",
-  "date": "2026-11-17",
-  "notes": "1. 调整基本信息、素材分类和创意人员布局，统一输入框尺寸与对齐。\n2. 剪辑按输入原样命名，不再自动添加“自剪”；四级分类自动补齐名称文字。\n3. 新增序号标识：# 按勾选顺序输出 1、2、3……，指定数字则使用固定序号；位置在日期之后、一级分类之前。\n4. 素材列表新增勾选框，支持只重命名单个或多个指定素材，未勾选文件保持原名。\n5. 运营和状态列居中，列标题可左右拖动；勾选状态、列宽和顺序可保存。\n6. 自定义素材名移到其他标签下方，采用红色粗体，输入框铺满整行。\n7. 更新弹窗居中于软件窗口；默认分隔条按上方信息高度定位，避免遮挡内容。\n8. 统一预览与执行的批量命名计划，保留冲突保护、自动分配运营和个人设置恢复。",
-  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.3/material-renamer.exe",
-  "sha256": "0bc5cb541e835f5565704946e5fcab16195ec8f9e9f94b51fe823f76b4013b77",
+  "version": "1.3.1",
+  "date": "2026-11-18",
+  "notes": "重要：1.3 及更早版本的自动重启存在缺陷，本次请手动下载 1.3.1 并双击运行一次。\n1. 修复更新后继承旧程序临时运行目录，导致 _tkinter 或 Python DLL 加载失败的问题。\n2. 更新安装包在独立运行环境中重新启动，确认界面正常加载后才清理旧版本备份。\n3. 增加 Gitee 优先的更新来源和备用下载校验；Gitee 国内仓库尚待管理员完成网页上传，未上线时继续使用 GitHub。\n4. 保留 1.3 的素材勾选、自动/固定序号、运营分配、排版和个人设置。",
+  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.3.1/material-renamer.exe",
+  "sha256": "40f10b12f0db500cf6aba8639929a39df783db5f61a964b260c9fedc12a3da83",
   "layout": {
     "widths": {
       "剪辑": 20,
@@ -42,5 +42,5 @@
       "list_height": 220
     }
   },
-  "layout_revision": "1.3"
+  "layout_revision": "1.3.1"
 }
