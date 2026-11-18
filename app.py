@@ -13,7 +13,7 @@ import layout_schema
 from dataclasses import replace
 from rename_core import (
     PRODUCTS, PLATFORMS, OPERATORS, AI_PEOPLE, DIRECTORS,
-    RenamePlan, build_rename_plan, make_name, format_fourth,
+    AI_TEXT_FIELDS, FIXED_TAGS, RenamePlan, build_rename_plan, make_name, format_fourth,
 )
 
 UPDATE_REPOSITORY = 'naikio0522/material-batch-renamer'
@@ -22,7 +22,7 @@ UPDATE_MANIFEST_URL = (
     'https://gitee.com/api/v5/repos/naikio/material-batch-renamer/contents/update.json?ref=master',
     'https://github.com/naikio0522/material-batch-renamer/raw/refs/heads/main/update.json',
 )
-UI_LAYOUT_REVISION = '1.3-serial-and-file-checkboxes'
+UI_LAYOUT_REVISION = '1.3.2-ai-text-fields'
 TABLE_COLUMNS = ('checked', 'old', 'title', 'operator', 'new', 'status')
 FILE_PANE_MIN_HEIGHT = 80
 
@@ -37,6 +37,7 @@ class App(TkinterDnD.Tk):
         self._refresh_job = None
         self._normal_geometry = None
         self._heading_drag = None
+        self._selection_anchor = None
         self._sash_manual = self._saved_settings.get('ui_layout_revision') == UI_LAYOUT_REVISION and self._saved_settings.get('sash_manual') is True
         self._layout_fields = {}
         self._layout_flows = {}
@@ -62,8 +63,8 @@ class App(TkinterDnD.Tk):
         self.first = tk.StringVar(value='功效')
         self.second = tk.StringVar(value='混剪')
         self.third = tk.StringVar()
-        self.fourth_fixed = {k: tk.BooleanVar() for k in ('AI剧情', 'AI非剧情', '打假', '测评', '矩阵号', '声明', '内部AI', '数字人AI')}
-        self.fourth_text = {k: tk.StringVar() for k in ('达人', '官媒专场', '大促活动', '痛点', '品牌活动事件', '其他')}
+        self.fourth_fixed = {k: tk.BooleanVar() for k in FIXED_TAGS}
+        self.fourth_text = {k: tk.StringVar() for k in (*AI_TEXT_FIELDS, '达人', '官媒专场', '大促活动', '痛点', '品牌活动事件', '其他')}
         self.title_text = tk.StringVar()
         self.operator_vars = {}
         self.ai_type = tk.StringVar()
@@ -153,7 +154,7 @@ class App(TkinterDnD.Tk):
                 available = event.width if event else container.winfo_width()
                 configured = self.layout_config['columns'].get(key, max_cols)
                 minimum = max([min_cell] + [w.winfo_reqwidth() + 8 for w in widgets])
-                cols = max(7 if key == 'tags' else 1, min(configured, available // minimum))
+                cols = max(min(7, len(widgets)) if key == 'tags' else 1, min(configured, available // minimum))
                 if cols == state['cols']:
                     return
                 state['cols'] = cols
@@ -224,6 +225,8 @@ class App(TkinterDnD.Tk):
         flow([field('一级分类 *', self.first, 'combo', ['功效', '背书', '活动'], 20, bold=True),
               field('二级分类 *', self.second, 'combo', ['口播', '混剪', '直播切片', '清水素材'], 20, bold=True),
               third_field], 3, 200, key='category')
+        self._ai_text_fields_row = flow([field(name, self.fourth_text[name], width=20) for name in AI_TEXT_FIELDS],
+                                       2, 250, key='ai_labels')
         heading('四级分类（按需填写）')
         fourth = ttk.Frame(form)
         fourth.pack(fill='x', pady=2)
@@ -233,7 +236,8 @@ class App(TkinterDnD.Tk):
         for pair in range(4):
             fourth.columnconfigure(pair * 2, uniform='fourth-label')
             fourth.columnconfigure(pair * 2 + 1, weight=1, uniform='fourth-input')
-        for index, (key, variable) in enumerate(self.fourth_text.items()):
+        regular_fields = [(key, variable) for key, variable in self.fourth_text.items() if key not in AI_TEXT_FIELDS]
+        for index, (key, variable) in enumerate(regular_fields):
             row, pair = divmod(index, 4)
             name = display_names.get(key, key)
             label = ttk.Label(fourth, text=name, anchor='center')
@@ -300,6 +304,26 @@ class App(TkinterDnD.Tk):
         self.tree.bind('<B1-Motion>', self.drag_heading)
         self.tree.bind('<ButtonRelease-1>', self.finish_heading_drag)
         self.tree.bind('<space>', self.toggle_highlighted)
+        self.tree.bind('<Control-a>', self.select_all_files)
+        self.tree.bind('<Control-A>', self.select_all_files)
+        self.tree.bind('<Control-i>', self.invert_selection)
+        self.tree.bind('<Control-I>', self.invert_selection)
+        self.tree.bind('<Escape>', self.clear_selection)
+        for modifier, mode in (('Control', 'toggle'), ('Alt', 'toggle'),
+                               ('Shift', 'range'), ('Control-Shift', 'add-range')):
+            for click in ('Button-1', 'Double-Button-1'):
+                self.tree.bind(f'<{modifier}-{click}>', lambda event, choice=mode: self.modified_selection_click(event, choice))
+        self.tree.bind('<Alt-B1-Motion>', lambda _event: 'break')
+        self.tree.bind('<Delete>', self.remove_highlighted_files)
+        self.tree.bind('<F2>', self.edit_focused_title)
+        for key, destination in (('Home', 'first'), ('End', 'last'), ('Up', 'previous'), ('Down', 'next')):
+            self.tree.bind(f'<{key}>', lambda _event, dest=destination: self.navigate_files(dest))
+            self.tree.bind(f'<Shift-{key}>', lambda _event, dest=destination: self.navigate_files(dest, extend=True))
+            self.tree.bind(f'<Control-Shift-{key}>', lambda _event, dest=destination: self.navigate_files(dest, extend=True, append=True))
+        self.tree.bind('<Control-Home>', lambda _event: self.navigate_files('first'))
+        self.tree.bind('<Control-End>', lambda _event: self.navigate_files('last'))
+        self.bind('<Control-o>', self.open_files_shortcut)
+        self.bind('<Control-O>', self.open_files_shortcut)
         status_label = ttk.Label(outer, textvariable=self.status, foreground='#314e6b', wraplength=1000)
         status_label.pack(fill='x', pady=(3, 0))
         status_label.bind('<Configure>', lambda event: status_label.configure(wraplength=max(280, event.width)))
@@ -603,15 +627,27 @@ class App(TkinterDnD.Tk):
     def remove_files(self):
         selected = {int(i) for i in self.tree.selection()}
         self.files = [f for i, f in enumerate(self.files) if i not in selected]
+        self._selection_anchor = None
         self.draw(preserve_view=False)
 
     def clear_files(self):
-        self.files.clear(); self.draw()
+        self.files.clear()
+        self._selection_anchor = None
+        self.draw()
 
     def edit_title(self, event):
-        if self.tree.identify_region(event.x, event.y) != 'cell' or self.column_at(event.x) == 'checked': return 'break'
+        if self.tree.identify_region(event.x, event.y) != 'cell': return 'break'
+        if self.column_at(event.x) == 'checked': return self.on_tree_click(event)
         row = self.tree.identify_row(event.y)
         if not row: return
+        self.set_file_title(row)
+
+    def edit_focused_title(self, _event=None):
+        row = self.tree.focus()
+        if row: self.set_file_title(row)
+        return 'break'
+
+    def set_file_title(self, row):
         file = self.files[int(row)]
         new = simpledialog.askstring('单独设置素材名', '输入素材名；留空则使用自定义素材名或原文件名：', initialvalue=file['title'], parent=self)
         if new is not None:
@@ -630,14 +666,93 @@ class App(TkinterDnD.Tk):
         column = self.column_at(event.x)
         if region == 'heading' and column != 'checked':
             self._heading_drag = (column, event.x)
-        elif region == 'cell' and column == 'checked':
+        elif region == 'cell':
             row = self.tree.identify_row(event.y)
             if row:
+                self._selection_anchor = int(row)
+                self.tree.focus_set()
                 file = self.files[int(row)]
-                file['checked'] = not file.get('checked', True)
-                self.tree.focus(row)
-                self.selection_changed()
-            return 'break'
+                if column == 'checked':
+                    file['checked'] = not file.get('checked', True)
+                    self.tree.focus(row)
+                    self.selection_changed()
+                    return 'break'
+                if column in ('old', 'title', 'new') and not file.get('checked', True):
+                    file['checked'] = True
+                    self.selection_changed()
+
+    def select_all_files(self, _event=None):
+        self.set_all_checked(True)
+        self.tree.selection_set(self.tree.get_children())
+        return 'break'
+
+    def invert_selection(self, _event=None):
+        for file in self.files: file['checked'] = not file.get('checked', True)
+        self.refresh_checked_selection()
+        return 'break'
+
+    def clear_selection(self, _event=None):
+        self.set_all_checked(False)
+        self.tree.selection_remove(*self.tree.selection())
+        return 'break'
+
+    def open_files_shortcut(self, _event=None):
+        self.add_files()
+        return 'break'
+
+    def remove_highlighted_files(self, _event=None):
+        self.remove_files()
+        return 'break'
+
+    def navigate_files(self, destination, extend=False, append=False):
+        if not self.files: return 'break'
+        current = int(self.tree.focus()) if self.tree.focus() else 0
+        index = {'first': 0, 'last': len(self.files) - 1,
+                 'previous': max(0, current - 1), 'next': min(len(self.files) - 1, current + 1)}[destination]
+        if extend:
+            anchor = self._selection_anchor
+            if anchor is None or not 0 <= anchor < len(self.files): anchor = current
+            self._selection_anchor = anchor
+            self.check_range(anchor, index, append=append)
+        else:
+            self.tree.selection_set(str(index))
+            self._selection_anchor = index
+        self.tree.focus(str(index))
+        self.tree.see(str(index))
+        return 'break'
+
+    def modified_selection_click(self, event, mode):
+        """Ctrl/Alt toggle a row; Shift selects a range without dragging."""
+        self._heading_drag = None
+        if self.tree.identify_region(event.x, event.y) != 'cell':
+            return self.on_tree_click(event)
+        row = self.tree.identify_row(event.y)
+        if not row: return 'break'
+        index = int(row)
+        self.tree.focus_set()
+        if mode == 'toggle':
+            file = self.files[index]
+            file['checked'] = not file.get('checked', True)
+            self._selection_anchor = index
+            self.refresh_checked_selection()
+        else:
+            anchor = self._selection_anchor
+            if anchor is None or not 0 <= anchor < len(self.files): anchor = index
+            self._selection_anchor = anchor
+            self.check_range(anchor, index, append=mode == 'add-range')
+        self.tree.focus(row)
+        return 'break'
+
+    def check_range(self, anchor, end, append=False):
+        first, last = sorted((anchor, end))
+        for index, file in enumerate(self.files):
+            file['checked'] = first <= index <= last or (append and file.get('checked', True))
+        self.refresh_checked_selection()
+        self.tree.focus(str(end))
+
+    def refresh_checked_selection(self):
+        self.selection_changed()
+        self.tree.selection_set([str(index) for index, file in enumerate(self.files) if file.get('checked', True)])
 
     def drag_heading(self, event):
         if self._heading_drag and abs(event.x - self._heading_drag[1]) > 5:

@@ -27,6 +27,8 @@ OPERATORS = {
 }
 AI_PEOPLE = ['QQ王芊芊', 'XZ徐学志', 'JN陈嘉楠', 'YZ张瑶', 'ZY张语嫣', 'XL雷枭']
 DIRECTORS = ['ZW赵婉君', 'TY唐玉', 'JL刘家龙', 'ZP张屏', 'ZJ周佳丽', 'LY李盈']
+AI_TEXT_FIELDS = ('内部AI', '矩阵号')
+FIXED_TAGS = ('AI剧情', 'AI非剧情', '打假', '测评', '声明')
 INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED = re.compile(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$', re.I)
 
@@ -47,7 +49,8 @@ def format_fourth(name, value):
         return ''
     prefix = {'达人': '达人', '痛点': '痛点'}.get(name, '')
     suffix = {'官媒专场': '专场', '专场': '专场', '大促活动': '活动',
-              '活动': '活动', '品牌活动事件': '品牌事件', '品牌事件': '品牌事件'}.get(name, '')
+              '活动': '活动', '品牌活动事件': '品牌事件', '品牌事件': '品牌事件',
+              '内部AI': '内部AI', '矩阵号': '矩阵号'}.get(name, '')
     if prefix and not value.startswith(prefix):
         value = prefix + value
     if suffix and not value.endswith(suffix):

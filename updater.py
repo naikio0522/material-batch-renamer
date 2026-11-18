@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 from tkinter import ttk
 
-CURRENT_VERSION = '1.3.1'
+CURRENT_VERSION = '1.3.2'
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 _HOSTS = {'github.com', 'raw.githubusercontent.com', 'release-assets.githubusercontent.com',

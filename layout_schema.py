@@ -1,5 +1,6 @@
 """Validation and defaults for published end-user layout settings."""
 import copy
+from rename_core import AI_TEXT_FIELDS, FIXED_TAGS
 
 GROUPS = {
     'basic1': ('基本信息 · 第一行', ['剪辑', '平台']),
@@ -7,17 +8,18 @@ GROUPS = {
     'basic3': ('基本信息 · 第三行', ['运营（多选）']),
     'basic4': ('基本信息 · 序号', ['序号标识']),
     'category': ('素材分类', ['一级分类', '二级分类', '三级分类']),
+    'ai_labels': ('四级分类 · 内部AI与矩阵号', list(AI_TEXT_FIELDS)),
     'fourth': ('四级分类', ['达人', '专场', '活动', '痛点', '品牌事件', '其他']),
-    'tags': ('其他标签', ['AI剧情', 'AI非剧情', '打假', '测评', '矩阵号', '声明', '内部AI', '数字人AI']),
+    'tags': ('其他标签', list(FIXED_TAGS)),
     'title': ('素材名称', ['自定义素材名']),
     'creative': ('创意人员', ['AI组创意人员', 'AI组创意类型', '编导创意']),
 }
-FIELDS = ['剪辑', '平台', '产品', '日期', '序号标识', '一级分类', '二级分类',
+FIELDS = ['剪辑', '平台', '产品', '日期', '序号标识', '一级分类', '二级分类', *AI_TEXT_FIELDS,
           '达人', '专场', '活动', '痛点', '品牌事件', '其他',
           '自定义素材名', 'AI组创意人员', 'AI组创意类型', '编导创意']
 DEFAULT_LAYOUT = {
-    'widths': dict(zip(FIELDS, [20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 11, 11, 11])),
-    'columns': {'basic1': 2, 'basic2': 2, 'basic3': 1, 'basic4': 1, 'category': 1, 'fourth': 4, 'title': 1, 'tags': 8, 'creative': 3},
+    'widths': {name: (11 if name in ('AI组创意人员', 'AI组创意类型', '编导创意') else 20) for name in FIELDS},
+    'columns': {'basic1': 2, 'basic2': 2, 'basic3': 1, 'basic4': 1, 'category': 1, 'ai_labels': 2, 'fourth': 4, 'title': 1, 'tags': len(FIXED_TAGS), 'creative': 3},
     'window': {'width': 1240, 'height': 860, 'maximized': True, 'list_height': 220},
 }
 
@@ -29,7 +31,7 @@ FIELD_ALIASES = {
     '品牌事件活动': '品牌事件',
 }
 FIXED_WIDTHS = {'剪辑', '平台', '产品', '日期'}
-MINIMUM_20_FIELDS = {'达人', '专场', '活动', '痛点', '品牌事件', '其他'}
+MINIMUM_20_FIELDS = {'达人', '专场', '活动', '痛点', '品牌事件', '其他', *AI_TEXT_FIELDS}
 FIXED_COLUMNS = {'basic1': 2, 'basic2': 2, 'basic3': 1, 'basic4': 1, 'fourth': 4, 'title': 1}
 
 
@@ -41,7 +43,7 @@ def width_limits(name):
 def column_limits(key):
     if key in FIXED_COLUMNS:
         return FIXED_COLUMNS[key], FIXED_COLUMNS[key]
-    return (7, 8) if key == 'tags' else (1, len(GROUPS[key][1]))
+    return (len(FIXED_TAGS), len(FIXED_TAGS)) if key == 'tags' else (1, len(GROUPS[key][1]))
 
 
 def _number(value, fallback, low, high):
