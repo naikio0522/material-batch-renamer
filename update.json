@@ -1,9 +1,9 @@
 {
-  "version": "1.3.1",
+  "version": "1.3.2",
   "date": "2026-11-18",
-  "notes": "重要：1.3 及更早版本的自动重启存在缺陷，本次请手动下载 1.3.1 并双击运行一次。\n1. 修复更新后继承旧程序临时运行目录，导致 _tkinter 或 Python DLL 加载失败的问题。\n2. 更新安装包在独立运行环境中重新启动，确认界面正常加载后才清理旧版本备份。\n3. 增加 Gitee 优先的更新来源和备用下载校验；Gitee 国内仓库尚待管理员完成网页上传，未上线时继续使用 GitHub。\n4. 保留 1.3 的素材勾选、自动/固定序号、运营分配、排版和个人设置。",
-  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.3.1/material-renamer.exe",
-  "sha256": "40f10b12f0db500cf6aba8639929a39df783db5f61a964b260c9fedc12a3da83",
+  "notes": "1. 在预览列表点击文件名即可勾选。按住 Alt 或 Ctrl 逐个点击可选择不相邻的素材，再点一次取消。Shift 点击选择连续范围，Ctrl+Shift 点击追加范围。\n2. 列表中支持 Ctrl+A 全选、Ctrl+I 反选、Esc 全不选、空格切换勾选。上下方向键及 Home、End 可移动光标，配合 Shift 连续选择。\n3. Ctrl+O 添加文件，F2 修改当前素材名，Delete 将高亮素材移出列表，磁盘原文件会保留。\n4. “内部AI”和“矩阵号”改为四级分类上方的填写框。例如填写“王芊芊”和“口腔科普”，会生成“王芊芊内部AI”和“口腔科普矩阵号”。留空时跳过，已有后缀只保留一次。移除“数字人AI”标签。\n\n升级提示：1.3.1 可使用软件内的“检查更新”。使用 1.3 或更早版本时，请手动下载并运行本版一次，避免旧版更新后重启失败。",
+  "download_url": "https://github.com/naikio0522/material-batch-renamer/releases/download/v1.3.2/material-renamer.exe",
+  "sha256": "2f273d40c9bb385184ea99806e7e03d36f3f3849df7acef871117eff6d00bcbf",
   "layout": {
     "widths": {
       "剪辑": 20,
@@ -13,6 +13,8 @@
       "序号标识": 20,
       "一级分类": 20,
       "二级分类": 20,
+      "内部AI": 20,
+      "矩阵号": 20,
       "达人": 20,
       "专场": 20,
       "活动": 20,
@@ -30,9 +32,10 @@
       "basic3": 1,
       "basic4": 1,
       "category": 1,
+      "ai_labels": 2,
       "fourth": 4,
       "title": 1,
-      "tags": 8,
+      "tags": 5,
       "creative": 3
     },
     "window": {
@@ -42,5 +45,5 @@
       "list_height": 220
     }
   },
-  "layout_revision": "1.3.1"
+  "layout_revision": "1.3.2"
 }
